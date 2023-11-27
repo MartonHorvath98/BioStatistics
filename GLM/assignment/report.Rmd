@@ -1,0 +1,135 @@
+---
+title: "Environmental factor that affects the abundance of bee (Eulaema nigrita) in the Mata Atlântica region (Brazil)"
+author: "Márton Horváth"
+date: "2023-11-24"
+output: html_document
+fig_caption: yes
+pandoc_args: ["--wrap=none"]
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+In the following report, enviromental factors affecting the abundance of the bee species *Eulaema nigrita* are analyzed. The sampling of the bees was carried out in the Brazilian Atlantic forest region using three different methods: net, net traps and traps. 
+*E. nigrita*, commonly known as the black orchid bee, it has an important ecological role as a pollinator in the tropical regions of the Americas, including Central and South America, where the species is native to. These robust bees are characterized by their black coloration and large size, and primarily prefer nectar from orchids and other flowering plants. *Eulaema nigrita* contributes significantly to biodiversity and ecosystem health through its crucial role in pollination processes, thus the assessment of the environmental risk factors is needed. Here, a number of potential predictor variables including climate (mean annual temperature and precipitation, temperature and precipitation seasonality) and land use (proportion forest cover and land use
+heterogeneity defined as the Shannon diversity of local land-use classes) were addressed.
+
+```{r, echo=F}
+#| out.width = "80%",
+#| fig.align="center",
+#| fig.cap = "**Fig 1)** The source and number of collected bees. On the map of Brazil, the Atlantic forest biome is highlighted grey, with extra information about natural reserves (dark green), and sample sources are size-proportionatly plotted to their source of origin."
+knitr::include_graphics(paste(plots_dir, 'Fig1_bee_map.png', sep = '/'))
+```
+
+## Methods
+
+### 1.) Data acquisition
+
+The shape file for the country, Brazil, was downloaded using the [`geobr`](https://github.com/ipeaGIT/geobr) package (C.N. Goncalves et al.), while shape files for the region Mata Atlântica and conservation units were downloaded from the spatial data database, [TerraBrasilis](http://terrabrasilis.dpi.inpe.br/en/home-page/), curated by the Brazilian National Institute for Space Research (INPE) (L.F.F.G. Assis et al., 2019). 
+```{r, echo=T, eval=F}
+brazil_map <- geobr::read_country()
+region_map <- sf::st_read(paste(data_dir, 'biome_border.shp',sep = '/'))
+units <- sf::st_read(paste(data_dir, 'conservation_units.shp',sep = '/'))
+```
+The raw data file containing the bee observations and other measurement data was acquired from the github repository directly.
+```{r, echo=F}
+#| tab.width = "80%",
+#| tab.align="center"
+knitr::kable(head(bee_file, 5))
+```
+There were several inconsistencies between the names used for the locations in the data file and used by the shape files, however the locations of the sample sources were still recognizable, hence the matching locations were selected based on a distance matrix built using longest common substring (lcs) distance. For this step the `stringdistmatrix()` function from the stringdist package was used. The type of the conservation unit (e.g natural park) was removed from the shape file names, to reduce misleading false positive hits in the matrix. 
+```{r echo=T, eval=F}
+# 1. pre-processing
+unit_names <- units %>% 
+  # categoric values were substracted from the name of the units
+  dplyr::mutate(name = stringr::str_remove(tolower(nome), tolower(categoria))) %>%
+  # units were converted to a named character vector
+  dplyr::pull(id, name = name)
+
+# 2. creating the distance matrix
+distance_matrix <- stringdistmatrix(a = unique(bee_file$SA), #data source 
+                                    b =  unique(names(unit_names)), #unit names
+                                    useNames = T, # keep named vector
+                                    method = 'lcs', # distance measure
+                                    nthread = 4)
+
+# 3.) extract the closest matching locations
+get_min <- function(row){
+  index <- which.min(row) 
+  return(names(row)[index]) # function to return the name of the closest match
+}
+matches <- apply(distance_matrix, 1, get_min)
+
+# 4.  merging the bee data and location ids 
+matches <- data.frame(SA = names(matches), 
+                      name = matches, 
+                      id = unit_names[match(matches, names(unit_names))])
+bee_data <- bee_data %>% 
+  merge(., matches, by = 'SA', all.x = T) %>%  #merge bee data with ids
+  dplyr::left_join(., units, by = c('id' = 'id')) #join bee data a map data on ids
+```
+
+### 2.) Building a generalized liner model for predicting abundance
+
+Generalized linear models (GLMs) add flexibility to the linear model by allowing deviations from the usual assumptions, extending linear regression to handle non-normal distributions and non-constant variance. In this case, when the response variable represents counts (number of captured bees), a negative binomial GLM was most suitable for modeling count data, accounting for the discrete and non-negative nature of count outcomes. In R, when fitting a negative binomial GLM using the `glm.nb()` function from the MASS package, the default link function, $g$ is the natural logarithm:
+
+$$y = ln^{-1}(\eta)$$
+As no correlation between the predictors was found, the final model was built, drawn from the results of a full model. The model used included a log hours of collection time, mean annual rainfall, and rainfall seasonality, temperature seasonality and forest coverage:
+```{r}
+glm.nb(Eulaema_nigrita ~ effort + MAP + Tseason + Pseason + forest.,
+       data = bee_data)
+```
+
+## Results
+
+### 1.) The most important predictor of bee abundance is the time spent collecting bees
+
+The above mentioned model's explanatory power was substantial (Nagelkerke's R2
+= 0.71). The null model, corresponding to effort = 0, MAP = 0, Tseason = 0, Pseason
+= 0 and forest. = 0, located the model's intercept at 5.04 (95% CI [4.20, 5.89], p < .001). There were mainly negative contributors to the model, as increase in both the forest coverage and temperature seasonality showed a negative effect on bee abundance (effect sizes -5.19 and -3.34, respectively), suggesting that *E. nigrita* prefers more open areas with a uniform annual mean temperature. Similarly, increase in annual rainfall showed a negative effect (effect size -6.34), on the other hand, rainfall seasonality had a positive effect (4.14). (Fig 2) The main effect, however, was introduced by the time spent by the researchers collecting bees, which is quite arbitrary, and overshadows the usability of the model.
+
+```{r, echo=F}
+#| out.width = "100%",
+#| fig.align="center",
+#| fig.cap = "**Fig 2)** The Abundance of the be *E. nigrita* predicted to decrease with higher mean temperature variation over the months (A), increase with variation in rainfall (B), and decrease with higher forest coverage (C) and mean annual rainfall (D)."
+knitr::include_graphics(paste(plots_dir, 'Fig2_contributors.png', sep = '/'))
+```
+```{r, echo=F}
+#| out.width = "100%",
+#| fig.align="center",
+#| fig.cap = "**Fig 3)** The Abundance of the be *E. nigrita* predicted to increase with time spent with capturing bees, which statement is true for all used capturing methods."
+knitr::include_graphics(paste(plots_dir, 'Fig3_effort.png', sep = '/'))
+```
+
+
+```{r, echo=F}
+knitr::kable(as.data.frame(summary(glm_opt)$coefficients),
+             caption = "Table 1) Coefficients of the model `Eulaema_nigrita ~ effort + MAP + Tseason + Pseason + forest.`")
+```
+### 2.) The same predictors optimize the time normalized model
+
+The negate the effect of the effort spent collecting bees, a new variable bee_norm was introduced to the data frame calculated as $(count) / exp^{(effort)}$, representing the capacity to capture *count* bees per hour. From the full model on `bee_norm` the very same predictors could have been drawn, except for rainfall seasonality. The smaller AIC (Akaike Information Criteria) value indicate the this model is closer to the truth, than the one including effort (`r round(glm_opt$aic,2)` and `r round(glm_norm_opt$aic,2)`, respectively), while a substantial explanatory power (Nagelkerke's R2 = 0.39). 
+
+```{r, echo=F}
+#| out.width = "100%",
+#| fig.align="center",
+#| fig.cap = "**Fig 4)** The time-normalized abundance of the bee *E. nigrita* predicted to decrease with higher mean temperature variation over the months (A) and forest coverage (C) and mean annual rainfall (D)."
+knitr::include_graphics(paste(plots_dir, 'Fig4_contributors_norm_effort.png', sep = '/'))
+```
+```{r, echo=F}
+knitr::kable(as.data.frame(summary(glm_norm_opt)$coefficients),
+             caption = "Table 1) Coefficients of the model `bee_norm ~ MAP + Tseason + forest.`")
+```
+
+### 2.) *E. nigrita* requires a drier period for population increase
+
+Although the rainfall seasonality was not found to be a significant contributor (p-value `r round(as.data.frame(summary(glm_norm_full)$coefficients)[6,4],2)`), comparing different still values had an effect on the response to mean annual precipitation. Higher variation in the distribution of the rainfall could mitigate the the negative effect of higher annual precipitation. This suggests, that the presence of a dry period period during the year is crucial for *E. nigrita*, more important than the amount total rainfall.
+```{r, echo=F}
+#| out.width = "100%",
+#| fig.align="center",
+#| fig.cap = "**Fig 5)** The prediction of the bee abundance determined by the mean annual rainfall changes contrary to the rainfall seasonality, when using fixed values set to the mean, mean + SD or mean - SD values of the original data set."
+knitr::include_graphics(paste(plots_dir, 'Fig5_rainfall_seasonality.png', sep = '/'))
+```
