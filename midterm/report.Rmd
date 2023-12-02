@@ -1,0 +1,102 @@
+---
+title: "Adaptation patterns in the length of the ovipository tube of the peacock fly *Tephritis conura*"
+author: "Márton Horváth"
+date: "2023-12-02"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+Adult females of the peacock fly species, *T conura*, lay their eggs in the fluwer buds of *Circium*, where the larvae develope over summer and then the young flies hatch. The species has well adapted to an ancient host plant, *Cirsium heterophyllum*, however around the last ice age a new linage emerged adapted to the colonization of a new host *Cirsium oleraceum*. In their phenotype these subspecies of the fly started diverging, with the ones shifting to lay their eggs in *C. olarecum* showing significantly shorter ovipositors. This difference in their reproductive organs can lead to speciation, and the complete separation of the two subspecies, however as it is shown in this study as of today there is still a gene flow between populations sharing a habitat.
+
+## Methods
+
+### 1.) Data acquisition:
+The data was downloaded from from github:
+```{r eval = F}
+#acquire data file
+if(!file.exists(file_path)){
+  download.file("https://raw.githubusercontent.com/MartonHorvath98/BIOS14_QuantitativeAnalysis/main/Lecture%20notes/datasets/tephritis/tephritis.txt", 
+                destfile = file_path,
+                method = "curl")
+}
+#load data file
+fly_data <- read.csv(file_path, sep = '\t',
+                     stringsAsFactors = T)
+```
+```{r echo = F}
+head(fly_data, 5)
+```
+The data file categorized the samples based on the sample source (`$Baltic`), and speciation type of the population (`$Patry`), as well as the preferred host plant (`$Hostplant`). It contained measurements of the body length (`$BL`), wing size, shape and melanization (`$Wing_length`, `$Wing_width`, `$Wing_are`, `$Melanized_area`, `$Melanization_ratio`) and the length of the ovipository of female flies (`$OL`). 
+
+### 2.) Model selection
+```{r echo=FALSE}
+#| out.width = "50%",
+#| out.extra='style="float:right; padding:10px"',
+#| fig.cap = "***Fig 1)** Heatmap showing the correlation between the possible response variables.*"
+(fly_heatmap)
+```
+Most response variables showed little to no variation based on the predictors, except for body length and the length of the ovipository. Moreover, there was a high correlation between the rest of the measurement values, showing over 0.8 correlation. Besides the already existing response variable I also calculated an additional value, named *'relative ovipository length'*, as $\frac {OL}{BL}*100 (\%)$. 
+
+Using all `BL`, `OL` and `relOL` a simple interaction linear model was run to assess the effects of the host plant and the patry of the population:
+```{r eval=F}
+lm(OL ~ Hostplant * Patry, data)
+```
+Shapiro test was run on all models to confirm the normality of the residuals as well as the Levene-test was used to check the homogeneity of the variances across groups. The models seemed to be suitable for ANOVA analysis, however, there was a great variation between populations of different origin. Hence, a new more complex model was set up to assess this random effect. The data was divided into 8 population based on the variables Baltic, Hostplant and Patry and a random effect of the population was introduced to the model. 
+```{r eval = F}
+# add new variable for population
+data %>% 
+  dplyr::mutate(population = as.factor(paste(Baltic, Patry, Hostplant))
+                
+#new linear mixed-effect model
+library(lme4)
+lmer(OL ~ Hostplant*Patry + (1|population), data = data, REML = F)
+```
+
+### 3.) Variance among groups
+Likelihood ratio test (LRT) was used for measuring the explanatory power of the interaction effects over the variance introduced by the random effect of the populations. To achieve this the null model was compared with the full model.
+```{r eval = F}
+#full model
+full_model <- lmer(OL ~ Hostplant*Patry + (1|population), data = data, REML = F)
+#null model
+null_model <- lmer(OL ~ 1 + (1|population), data = data, REML = F)
+#likelihood ratio test
+lrt_results <- anova(null_model, lmer_model)
+```
+
+## Results
+
+### 1.) There was a considerable variance introduced by sampling source
+
+The source of data, originating either from the East or West-Baltic introduced a significant variation to the results. This mixed effect explained `r round(0.09/(0.09+0.13)*100,2)`% of the total variance. The intraclass correlation coefficient (ICC), which can help identify clustering also showed moderate clustering of 0.30 justifying the use of the more complex model, even though the LRT test was only marginal: `r round(lrt_results[["Pr(>Chisq)"]][2],3)`. 
+
+```{r, echo=F}
+#| out.width = "100%",
+#| fig.align="center",
+#| fig.cap = "***Fig 2)** The distribution of mean measurement values for body length (A), ovipository length (B) and body-proportionate ovipository length (C) over the sampling locations and (if applicable) the sexes.*"
+knitr::include_graphics(paste(plots_dir, 'Fig1_exploratory.png', sep = '/'))
+```
+
+### 2.) There is gene flow between the subspecies
+
+The interaction effect in all cases was opposite then the individual effects caused by the host plant or the patry of the population, meaning that the presence of both types of flies at the same place mitigates divergence of the body length and ovipository length as well. It can be explained if these individuals are hibrids between the tow extrem populations in allpoatric cases.
+
+```{r, echo=F}
+knitr::kable(report_table(lmer_model)[1:4, 1:12],
+             caption = "Table 1) Coefficients of the model `OL ~ Hostplant*Patry + (1|population)`")
+```
+In allopatric populations, however, replacing the host plant to *C. oleraceum* caused the flies ovipository to shrink on average by 0.14 mm-s, while their body on average grew by 0.05 mm-s, meaning a bigger body-proportionate shrinkage of their ovipository tubes by 3.08%.
+```{r, echo=F}
+#| out.width = "100%",
+#| fig.align="center",
+#| fig.cap = "***Fig 3)** The changes in the body size (A), ovipository (B) and it's relative size (C) of T. conura flies feeding on C. oeracum instead of C. heterophyllum.*"
+knitr::include_graphics(paste(plots_dir, 'Fig2_interactions.png', sep = '/'))
+```
+
+### Data availability
+
+The code for producing these results and plots is available on my [github]().
